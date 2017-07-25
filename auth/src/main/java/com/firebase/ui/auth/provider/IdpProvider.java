@@ -14,31 +14,14 @@
 
 package com.firebase.ui.auth.provider;
 
-import android.app.Activity;
-import android.content.Context;
-import android.content.Intent;
-import android.os.Bundle;
-
 import com.firebase.ui.auth.IdpResponse;
 
-public interface IdpProvider {
-
-    /**
-     * Retrieves the name of the IDP, for display on-screen.
-     */
-    String getName(Context context);
-
-    String getProviderId();
-
-    void setAuthenticationCallback(IdpCallback callback);
-
-    void onActivityResult(int requestCode, int resultCode, Intent data);
-
-    void startLogin(Activity activity);
-
+public interface IdpProvider extends Provider {
     interface IdpCallback {
         void onSuccess(IdpResponse idpResponse);
 
-        void onFailure(Bundle extra);
+        void onFailure();
     }
+
+    void setAuthenticationCallback(IdpCallback callback);
 }

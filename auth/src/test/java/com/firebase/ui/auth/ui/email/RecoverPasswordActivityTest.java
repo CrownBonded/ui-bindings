@@ -19,12 +19,11 @@ import android.widget.Button;
 
 import com.firebase.ui.auth.BuildConfig;
 import com.firebase.ui.auth.R;
-import com.firebase.ui.auth.test_helpers.ActivityHelperShadow;
-import com.firebase.ui.auth.test_helpers.AutoCompleteTask;
-import com.firebase.ui.auth.test_helpers.BaseHelperShadow;
-import com.firebase.ui.auth.test_helpers.CustomRobolectricGradleTestRunner;
-import com.firebase.ui.auth.test_helpers.TestConstants;
-import com.firebase.ui.auth.test_helpers.TestHelper;
+import com.firebase.ui.auth.testhelpers.AuthHelperShadow;
+import com.firebase.ui.auth.testhelpers.AutoCompleteTask;
+import com.firebase.ui.auth.testhelpers.CustomRobolectricGradleTestRunner;
+import com.firebase.ui.auth.testhelpers.TestConstants;
+import com.firebase.ui.auth.testhelpers.TestHelper;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -39,7 +38,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @RunWith(CustomRobolectricGradleTestRunner.class)
-@Config(constants = BuildConfig.class, sdk = 23)
+@Config(constants = BuildConfig.class, sdk = 25)
 public class RecoverPasswordActivityTest {
 
     @Before
@@ -57,13 +56,14 @@ public class RecoverPasswordActivityTest {
     }
 
     @Test
-    @Config(shadows = {BaseHelperShadow.class, ActivityHelperShadow.class})
+    @Config(shadows = {AuthHelperShadow.class})
     public void testNextButton_sendsEmail() {
         RecoverPasswordActivity recoverPasswordActivity = createActivity();
+
         Button nextButton = (Button) recoverPasswordActivity.findViewById(R.id.button_done);
-        when(ActivityHelperShadow.sFirebaseAuth.sendPasswordResetEmail(TestConstants.EMAIL))
+        when(AuthHelperShadow.sFirebaseAuth.sendPasswordResetEmail(TestConstants.EMAIL))
                 .thenReturn(new AutoCompleteTask<Void>(null, true, null));
         nextButton.performClick();
-        verify(ActivityHelperShadow.sFirebaseAuth).sendPasswordResetEmail(TestConstants.EMAIL);
+        verify(AuthHelperShadow.sFirebaseAuth).sendPasswordResetEmail(TestConstants.EMAIL);
     }
 }

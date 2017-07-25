@@ -14,16 +14,20 @@
 
 package com.firebase.ui.auth.ui.idp;
 
-import android.app.Activity;
+import android.content.Intent;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.RestrictTo;
 import android.util.Log;
 
+import com.firebase.ui.auth.ErrorCodes;
 import com.firebase.ui.auth.IdpResponse;
-import com.firebase.ui.auth.ui.BaseHelper;
-import com.firebase.ui.auth.ui.TaskFailureLogger;
-import com.firebase.ui.auth.ui.account_link.WelcomeBackIdpPrompt;
-import com.firebase.ui.auth.ui.account_link.WelcomeBackPasswordPrompt;
+import com.firebase.ui.auth.ResultCodes;
+import com.firebase.ui.auth.provider.ProviderUtils;
+import com.firebase.ui.auth.ui.HelperActivityBase;
+import com.firebase.ui.auth.User;
+import com.firebase.ui.auth.ui.accountlink.WelcomeBackIdpPrompt;
+import com.firebase.ui.auth.ui.accountlink.WelcomeBackPasswordPrompt;
 import com.firebase.ui.auth.util.signincontainer.SaveSmartLock;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
@@ -34,93 +38,86 @@ import com.google.firebase.auth.EmailAuthProvider;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseAuthUserCollisionException;
 import com.google.firebase.auth.FirebaseUser;
-import com.google.firebase.auth.ProviderQueryResult;
 
+@RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
 public class CredentialSignInHandler implements OnCompleteListener<AuthResult> {
-    private final static String TAG = "CredentialSignInHandler";
+    private static final String TAG = "CredentialSignInHandler";
 
-    private Activity mActivity;
-    private BaseHelper mHelper;
-    @Nullable private SaveSmartLock mSmartLock;
+    private HelperActivityBase mActivity;
+    @Nullable
+    private SaveSmartLock mSmartLock;
     private IdpResponse mResponse;
-    private int mAccountLinkResultCode;
+    private int mAccountLinkRequestCode;
 
     public CredentialSignInHandler(
-            Activity activity,
-            BaseHelper helper,
+            HelperActivityBase activity,
             @Nullable SaveSmartLock smartLock,
-            int accountLinkResultCode,
+            int accountLinkRequestCode,
             IdpResponse response) {
         mActivity = activity;
-        mHelper = helper;
         mSmartLock = smartLock;
         mResponse = response;
-        mAccountLinkResultCode = accountLinkResultCode;
+        mAccountLinkRequestCode = accountLinkRequestCode;
     }
 
     @Override
     public void onComplete(@NonNull Task<AuthResult> task) {
         if (task.isSuccessful()) {
             FirebaseUser firebaseUser = task.getResult().getUser();
-            mHelper.saveCredentialsOrFinish(
-                    mSmartLock,
-                    mActivity,
-                    firebaseUser,
-                    mResponse);
+            mActivity.saveCredentialsOrFinish(mSmartLock, firebaseUser, mResponse);
         } else {
             if (task.getException() instanceof FirebaseAuthUserCollisionException) {
-                final String email = mResponse.getEmail();
-                FirebaseAuth firebaseAuth = mHelper.getFirebaseAuth();
-                firebaseAuth.fetchProvidersForEmail(email)
-                        .addOnFailureListener(new TaskFailureLogger(
-                                TAG, "Error fetching providers for email"))
-                        .addOnSuccessListener(new StartWelcomeBackFlow(email))
-                        .addOnFailureListener(new OnFailureListener() {
-                            @Override
-                            public void onFailure(@NonNull Exception e) {
-                                // TODO: What to do when signing in with Credential fails
-                                // and we can't continue to Welcome back flow without
-                                // knowing providers?
-                            }
-                        });
+                String email = mResponse.getEmail();
+                if (email != null) {
+                    FirebaseAuth auth = mActivity.getAuthHelper().getFirebaseAuth();
+                    ProviderUtils.fetchTopProvider(auth, email)
+                            .addOnSuccessListener(new StartWelcomeBackFlow())
+                            .addOnFailureListener(new OnFailureListener() {
+                                @Override
+                                public void onFailure(@NonNull Exception e) {
+                                    Intent intent = IdpResponse.getErrorCodeIntent(ErrorCodes.UNKNOWN_ERROR);
+                                    mActivity.finish(ResultCodes.CANCELED, intent);
+                                }
+                            });
+                    return;
+                }
             } else {
-                mHelper.dismissDialog();
-                Log.e(TAG, "Unexpected exception when signing in with credential",
+                Log.e(TAG,
+                      "Unexpected exception when signing in with credential "
+                              + mResponse.getProviderType()
+                              + " unsuccessful. Visit https://console.firebase.google.com to enable it.",
                       task.getException());
             }
+
+            mActivity.getDialogHolder().dismissDialog();
         }
     }
 
-    private class StartWelcomeBackFlow implements OnSuccessListener<ProviderQueryResult> {
-        private String mEmail;
-
-        public StartWelcomeBackFlow(String email) {
-            mEmail = email;
-        }
-
+    private class StartWelcomeBackFlow implements OnSuccessListener<String> {
         @Override
-        public void onSuccess(@NonNull ProviderQueryResult result) {
-            mHelper.dismissDialog();
+        public void onSuccess(String provider) {
+            mActivity.getDialogHolder().dismissDialog();
 
-            String provider = result.getProviders().get(0);
-            if (provider.equals(EmailAuthProvider.PROVIDER_ID)) {
+            if (provider == null) {
+                throw new IllegalStateException(
+                        "No provider even though we received a FirebaseAuthUserCollisionException");
+            } else if (provider.equals(EmailAuthProvider.PROVIDER_ID)) {
                 // Start email welcome back flow
                 mActivity.startActivityForResult(
                         WelcomeBackPasswordPrompt.createIntent(
-                                mHelper.getApplicationContext(),
-                                mHelper.getFlowParams(),
-                                mResponse
-                        ), mAccountLinkResultCode);
+                                mActivity,
+                                mActivity.getFlowParams(),
+                                mResponse),
+                        mAccountLinkRequestCode);
             } else {
-                // Start IDP welcome back flow
+                // Start Idp welcome back flow
                 mActivity.startActivityForResult(
                         WelcomeBackIdpPrompt.createIntent(
-                                mHelper.getApplicationContext(),
-                                mHelper.getFlowParams(),
-                                result.getProviders().get(0),
-                                mResponse,
-                                mEmail
-                        ), mAccountLinkResultCode);
+                                mActivity,
+                                mActivity.getFlowParams(),
+                                new User.Builder(provider, mResponse.getEmail()).build(),
+                                mResponse),
+                        mAccountLinkRequestCode);
             }
         }
     }

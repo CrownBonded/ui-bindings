@@ -17,62 +17,88 @@ package com.firebase.ui.auth;
 import android.content.Intent;
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.RestrictTo;
+import android.text.TextUtils;
 
 import com.firebase.ui.auth.ui.ExtraConstants;
+import com.google.firebase.auth.FacebookAuthProvider;
+import com.google.firebase.auth.GoogleAuthProvider;
+import com.google.firebase.auth.TwitterAuthProvider;
 
 /**
  * A container that encapsulates the result of authenticating with an Identity Provider.
  */
 public class IdpResponse implements Parcelable {
-
-    private final String mProviderId;
-    @Nullable private final String mEmail;
+    private final User mUser;
     private final String mToken;
     private final String mSecret;
+    private final int mErrorCode;
 
-    public IdpResponse(String providerId, @Nullable String email) {
-        this(providerId, email, null, null);
+    private IdpResponse(int errorCode) {
+        this(null, null, null, errorCode);
     }
 
-    public IdpResponse(
-            String providerId, @Nullable String email, @Nullable String token) {
-        this(providerId, email, token, null);
-    }
-
-    public IdpResponse(
-            String providerId,
-            @Nullable String email,
-            @Nullable String token,
-            @Nullable String secret) {
-        mProviderId = providerId;
-        mEmail = email;
+    private IdpResponse(
+            User user,
+            String token,
+            String secret,
+            int errorCode) {
+        mUser = user;
         mToken = token;
         mSecret = secret;
+        mErrorCode = errorCode;
     }
 
-    public static final Creator<IdpResponse> CREATOR = new Creator<IdpResponse>() {
-        @Override
-        public IdpResponse createFromParcel(Parcel in) {
-            return new IdpResponse(
-                    in.readString(),
-                    in.readString(),
-                    in.readString(),
-                    in.readString()
-            );
+    /**
+     * Extract the {@link IdpResponse} from the flow's result intent.
+     *
+     * @param resultIntent The intent which {@code onActivityResult} was called with.
+     * @return The IdpResponse containing the token(s) from signing in with the Idp
+     */
+    @Nullable
+    public static IdpResponse fromResultIntent(Intent resultIntent) {
+        if (resultIntent != null) {
+            return resultIntent.getParcelableExtra(ExtraConstants.EXTRA_IDP_RESPONSE);
+        } else {
+            return null;
         }
+    }
 
-        @Override
-        public IdpResponse[] newArray(int size) {
-            return new IdpResponse[size];
-        }
-    };
+    @RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
+    public static Intent getErrorCodeIntent(int errorCode) {
+        return new IdpResponse(errorCode).toIntent();
+    }
+
+    @RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
+    public Intent toIntent() {
+        return new Intent().putExtra(ExtraConstants.EXTRA_IDP_RESPONSE, this);
+    }
 
     /**
      * Get the type of provider. e.g. {@link AuthUI#GOOGLE_PROVIDER}
      */
+    @NonNull
+    @AuthUI.SupportedProvider
     public String getProviderType() {
-        return mProviderId;
+        return mUser.getProviderId();
+    }
+
+    /**
+     * Get the email used to sign in.
+     */
+    @Nullable
+    public String getEmail() {
+        return mUser.getEmail();
+    }
+
+    /**
+     * Get the phone number used to sign in.
+     */
+    @Nullable
+    public String getPhoneNumber() {
+        return mUser.getPhoneNumber();
     }
 
     /**
@@ -92,11 +118,10 @@ public class IdpResponse implements Parcelable {
     }
 
     /**
-     * Get the email used to sign in.
+     * Get the error code for a failed sign in
      */
-    @Nullable
-    public String getEmail() {
-        return mEmail;
+    public int getErrorCode() {
+        return mErrorCode;
     }
 
     @Override
@@ -106,20 +131,65 @@ public class IdpResponse implements Parcelable {
 
     @Override
     public void writeToParcel(Parcel dest, int flags) {
-        dest.writeString(mProviderId);
-        dest.writeString(mEmail);
+        dest.writeParcelable(mUser, flags);
         dest.writeString(mToken);
         dest.writeString(mSecret);
+        dest.writeInt(mErrorCode);
     }
 
-    /**
-     * Extract the {@link IdpResponse} from the flow's result intent.
-     *
-     * @param resultIntent The intent which {@code onActivityResult} was called with.
-     * @return The IdpResponse containing the token(s) from signing in with the Idp
-     */
-    @Nullable
-    public static IdpResponse fromResultIntent(Intent resultIntent) {
-        return resultIntent.getParcelableExtra(ExtraConstants.EXTRA_IDP_RESPONSE);
+    public static final Creator<IdpResponse> CREATOR = new Creator<IdpResponse>() {
+        @Override
+        public IdpResponse createFromParcel(Parcel in) {
+            return new IdpResponse(
+                    in.<User>readParcelable(User.class.getClassLoader()),
+                    in.readString(),
+                    in.readString(),
+                    in.readInt()
+            );
+        }
+
+        @Override
+        public IdpResponse[] newArray(int size) {
+            return new IdpResponse[size];
+        }
+    };
+
+    @RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
+    public static class Builder {
+        private User mUser;
+        private String mToken;
+        private String mSecret;
+
+        public Builder(@NonNull User user) {
+            mUser = user;
+        }
+
+        public Builder setToken(String token) {
+            mToken = token;
+            return this;
+        }
+
+        public Builder setSecret(String secret) {
+            mSecret = secret;
+            return this;
+        }
+
+        public IdpResponse build() {
+            String providerId = mUser.getProviderId();
+            if ((providerId.equalsIgnoreCase(GoogleAuthProvider.PROVIDER_ID)
+                    || providerId.equalsIgnoreCase(FacebookAuthProvider.PROVIDER_ID)
+                    || providerId.equalsIgnoreCase(TwitterAuthProvider.PROVIDER_ID))
+                    && TextUtils.isEmpty(mToken)) {
+                throw new IllegalStateException(
+                        "Token cannot be null when using a non-email provider.");
+            }
+            if (providerId.equalsIgnoreCase(TwitterAuthProvider.PROVIDER_ID)
+                    && TextUtils.isEmpty(mSecret)) {
+                throw new IllegalStateException(
+                        "Secret cannot be null when using the Twitter provider.");
+            }
+
+            return new IdpResponse(mUser, mToken, mSecret, ResultCodes.OK);
+        }
     }
 }

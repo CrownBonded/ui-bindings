@@ -1,13 +1,11 @@
 package com.firebase.ui.auth.util.signincontainer;
 
-import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentSender;
-import android.net.ConnectivityManager;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.RestrictTo;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentActivity;
 import android.support.v4.app.FragmentManager;
@@ -15,17 +13,18 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import com.firebase.ui.auth.AuthUI;
+import com.firebase.ui.auth.IdpResponse;
 import com.firebase.ui.auth.R;
+import com.firebase.ui.auth.ResultCodes;
 import com.firebase.ui.auth.ui.ExtraConstants;
 import com.firebase.ui.auth.ui.FlowParameters;
-import com.firebase.ui.auth.ui.FragmentHelper;
 import com.firebase.ui.auth.ui.TaskFailureLogger;
-import com.firebase.ui.auth.ui.email.SignInNoPasswordActivity;
+import com.firebase.ui.auth.User;
+import com.firebase.ui.auth.ui.email.RegisterEmailActivity;
 import com.firebase.ui.auth.ui.idp.AuthMethodPickerActivity;
-import com.firebase.ui.auth.util.CredentialsApiHelper;
-import com.firebase.ui.auth.util.EmailFlowUtil;
-import com.firebase.ui.auth.util.GoogleApiConstants;
-import com.firebase.ui.auth.util.PlayServicesHelper;
+import com.firebase.ui.auth.ui.phone.PhoneVerificationActivity;
+import com.firebase.ui.auth.util.GoogleApiHelper;
+import com.firebase.ui.auth.util.GoogleSignInHelper;
 import com.google.android.gms.auth.api.Auth;
 import com.google.android.gms.auth.api.credentials.Credential;
 import com.google.android.gms.auth.api.credentials.CredentialRequest;
@@ -43,33 +42,47 @@ import com.google.firebase.auth.EmailAuthProvider;
 import com.google.firebase.auth.FacebookAuthProvider;
 import com.google.firebase.auth.FirebaseAuthInvalidUserException;
 import com.google.firebase.auth.GoogleAuthProvider;
+import com.google.firebase.auth.PhoneAuthProvider;
 import com.google.firebase.auth.TwitterAuthProvider;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import static android.app.Activity.RESULT_CANCELED;
-import static android.app.Activity.RESULT_OK;
-import static com.firebase.ui.auth.ui.ResultCodes.RESULT_NO_NETWORK;
-
 /**
- * Attempts to acquire a credential from Smart Lock for Passwords to sign in
- * an existing account. If this succeeds, an attempt is made to sign the user in
- * with this credential. If it does not, the
- * {@link AuthMethodPickerActivity authentication method picker activity}
- * is started, unless only email is supported, in which case the
- * {@link SignInNoPasswordActivity email sign-in flow}
- * is started.
+ * Attempts to acquire a credential from Smart Lock for Passwords to sign in an existing account. If
+ * this succeeds, an attempt is made to sign the user in with this credential. If it does not, the
+ * {@link AuthMethodPickerActivity authentication method picker activity} is started, unless only
+ * email is supported, in which case the {@link RegisterEmailActivity} is started.
  */
+@RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
 public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
     private static final String TAG = "SignInDelegate";
     private static final int RC_CREDENTIALS_READ = 2;
     private static final int RC_IDP_SIGNIN = 3;
     private static final int RC_AUTH_METHOD_PICKER = 4;
     private static final int RC_EMAIL_FLOW = 5;
-    private static final int RC_PLAY_SERVICES = 6;
+    private static final int RC_PHONE_FLOW = 6;
 
     private Credential mCredential;
+
+    public static void delegate(FragmentActivity activity, FlowParameters params) {
+        FragmentManager fm = activity.getSupportFragmentManager();
+        Fragment fragment = fm.findFragmentByTag(TAG);
+        if (!(fragment instanceof SignInDelegate)) {
+            SignInDelegate result = new SignInDelegate();
+            result.setArguments(params.toBundle());
+            fm.beginTransaction().add(result, TAG).disallowAddToBackStack().commit();
+        }
+    }
+
+    public static SignInDelegate getInstance(FragmentActivity activity) {
+        Fragment fragment = activity.getSupportFragmentManager().findFragmentByTag(TAG);
+        if (fragment instanceof SignInDelegate) {
+            return (SignInDelegate) fragment;
+        } else {
+            return null;
+        }
+    }
 
     @Override
     public void onCreate(Bundle savedInstance) {
@@ -79,49 +92,23 @@ public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
             return;
         }
 
-        if (!hasNetworkConnection()) {
-            Log.d(TAG, "No network connection");
-            finish(RESULT_NO_NETWORK, new Intent());
-            return;
-        }
-
-        // Make Google Play Services available at the correct version, if possible
-        boolean madeAvailable =
-                PlayServicesHelper
-                        .getInstance(getActivity())
-                        .makePlayServicesAvailable(getActivity(), RC_PLAY_SERVICES,
-                                                   new DialogInterface.OnCancelListener() {
-                                                       @Override
-                                                       public void onCancel(DialogInterface dialogInterface) {
-                                                           Log.w(TAG,
-                                                                 "playServices:dialog.onCancel()");
-                                                           finish(RESULT_CANCELED, new Intent());
-                                                       }
-                                                   });
-
-        if (!madeAvailable
-                || !PlayServicesHelper.getInstance(getActivity()).isPlayServicesAvailable()) {
-            Log.w(TAG, "playServices: could not make available.");
-            finish(RESULT_CANCELED, new Intent());
-            return;
-        }
-
-        if (mHelper.getFlowParams().smartLockEnabled) {
-            mHelper.showLoadingDialog(R.string.progress_dialog_loading);
+        FlowParameters flowParams = getFlowParams();
+        if (flowParams.enableCredentials) {
+            getDialogHolder().showLoadingDialog(R.string.fui_progress_dialog_loading);
 
             mGoogleApiClient = new GoogleApiClient.Builder(getContext().getApplicationContext())
                     .addConnectionCallbacks(this)
                     .addApi(Auth.CREDENTIALS_API)
-                    .enableAutoManage(getActivity(), GoogleApiConstants.AUTO_MANAGE_ID1, this)
+                    .enableAutoManage(getActivity(), GoogleApiHelper.getSafeAutoManageId(), this)
                     .build();
             mGoogleApiClient.connect();
 
-            mHelper.getCredentialsApi()
+            getAuthHelper().getCredentialsApi()
                     .request(mGoogleApiClient,
-                             new CredentialRequest.Builder()
-                                     .setPasswordLoginSupported(true)
-                                     .setAccountTypes(getSupportedAccountTypes().toArray(new String[0]))
-                                     .build())
+                            new CredentialRequest.Builder()
+                                    .setPasswordLoginSupported(true)
+                                    .setAccountTypes(getSupportedAccountTypes().toArray(new String[0]))
+                                    .build())
                     .setResultCallback(this);
         } else {
             startAuthMethodChoice();
@@ -143,21 +130,20 @@ public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
             // Auto sign-in success
             handleCredential(result.getCredential());
             return;
-        } else if (status.hasResolution()) {
-            try {
-                if (status.getStatusCode() == CommonStatusCodes.RESOLUTION_REQUIRED) {
-                    mHelper.startIntentSenderForResult(
-                            status.getResolution().getIntentSender(),
-                            RC_CREDENTIALS_READ);
-                    return;
-                } else if (!getSupportedAccountTypes().isEmpty()) {
-                    mHelper.startIntentSenderForResult(
-                            status.getResolution().getIntentSender(),
-                            RC_CREDENTIALS_READ);
-                    return;
+        } else {
+            if (status.hasResolution()) {
+                try {
+                    if (status.getStatusCode() == CommonStatusCodes.RESOLUTION_REQUIRED) {
+                        startIntentSenderForResult(
+                                status.getResolution().getIntentSender(),
+                                RC_CREDENTIALS_READ);
+                        return;
+                    }
+                } catch (IntentSender.SendIntentException e) {
+                    Log.e(TAG, "Failed to send Credentials intent.", e);
                 }
-            } catch (IntentSender.SendIntentException e) {
-                Log.e(TAG, "Failed to send Credentials intent.", e);
+            } else {
+                Log.e(TAG, "Status message:\n" + status.getStatusMessage());
             }
         }
         startAuthMethodChoice();
@@ -165,6 +151,7 @@ public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
 
     @Override
     public void onConnected(@Nullable Bundle bundle) {
+        // We only care about onResult
     }
 
     @Override
@@ -172,7 +159,7 @@ public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
         super.onActivityResult(requestCode, resultCode, data);
         switch (requestCode) {
             case RC_CREDENTIALS_READ:
-                if (resultCode == RESULT_OK) {
+                if (resultCode == ResultCodes.OK) {
                     // credential selected from SmartLock, log in with that credential
                     Credential credential = data.getParcelableExtra(Credential.EXTRA_KEY);
                     handleCredential(credential);
@@ -184,10 +171,8 @@ public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
             case RC_IDP_SIGNIN:
             case RC_AUTH_METHOD_PICKER:
             case RC_EMAIL_FLOW:
+            case RC_PHONE_FLOW:
                 finish(resultCode, data);
-                break;
-            case RC_PLAY_SERVICES:
-                if (resultCode != RESULT_OK) finish(resultCode, data);
                 break;
             default:
                 IdpSignInContainer signInContainer = IdpSignInContainer.getInstance(getActivity());
@@ -199,8 +184,8 @@ public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
 
     private List<String> getSupportedAccountTypes() {
         List<String> accounts = new ArrayList<>();
-        for (AuthUI.IdpConfig idpConfig : mHelper.getFlowParams().providerInfo) {
-            String providerId = idpConfig.getProviderId();
+        for (AuthUI.IdpConfig idpConfig : getFlowParams().providerInfo) {
+            @AuthUI.SupportedProvider String providerId = idpConfig.getProviderId();
             if (providerId.equals(GoogleAuthProvider.PROVIDER_ID)
                     || providerId.equals(FacebookAuthProvider.PROVIDER_ID)
                     || providerId.equals(TwitterAuthProvider.PROVIDER_ID)) {
@@ -247,46 +232,58 @@ public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
     }
 
     private void startAuthMethodChoice() {
-        List<AuthUI.IdpConfig> idpConfigs = mHelper.getFlowParams().providerInfo;
+        FlowParameters flowParams = getFlowParams();
+        List<AuthUI.IdpConfig> idpConfigs = flowParams.providerInfo;
 
-        // If the only provider is Email, immediately launch the email flow. Otherwise, launch
-        // the auth method picker screen.
+        // If there is only one provider selected, launch the flow directly
         if (idpConfigs.size() == 1) {
-            if (idpConfigs.get(0).getProviderId().equals(EmailAuthProvider.PROVIDER_ID)) {
-                startActivityForResult(
-                        EmailFlowUtil.createIntent(
-                                getContext(),
-                                mHelper.getFlowParams()),
-                        RC_EMAIL_FLOW);
-            } else {
-                redirectToIdpSignIn(null,
-                                    providerIdToAccountType(idpConfigs.get(0).getProviderId()));
+            String firstProvider = idpConfigs.get(0).getProviderId();
+            switch (firstProvider) {
+                case EmailAuthProvider.PROVIDER_ID:
+                    // Go directly to email flow
+                    startActivityForResult(
+                            RegisterEmailActivity.createIntent(getContext(), flowParams),
+                            RC_EMAIL_FLOW);
+                    break;
+                case PhoneAuthProvider.PROVIDER_ID:
+                    // Go directly to phone flow
+                    startActivityForResult(
+                            PhoneVerificationActivity.createIntent(getContext(), flowParams, null),
+                            RC_PHONE_FLOW);
+                    break;
+                default:
+                    // Launch IDP flow
+                    redirectToIdpSignIn(null, providerIdToAccountType(firstProvider));
+                    break;
             }
         } else {
             startActivityForResult(
                     AuthMethodPickerActivity.createIntent(
                             getContext(),
-                            mHelper.getFlowParams()),
+                            flowParams),
                     RC_AUTH_METHOD_PICKER);
         }
-        mHelper.dismissDialog();
+        getDialogHolder().dismissDialog();
     }
 
     /**
-     * Begin sign in process with email and password from a SmartLock credential.
-     * On success, finish with {@code RESULT_OK}.
-     * On failure, delete the credential from SmartLock (if applicable) and then launch the
-     * auth method picker flow.
+     * Begin sign in process with email and password from a SmartLock credential. On success, finish
+     * with {@link ResultCodes#OK RESULT_OK}. On failure, delete the credential from SmartLock (if
+     * applicable) and then launch the auth method picker flow.
      */
     private void signInWithEmailAndPassword(String email, String password) {
-        mHelper.getFirebaseAuth()
+        final IdpResponse response =
+                new IdpResponse.Builder(new User.Builder(EmailAuthProvider.PROVIDER_ID, email).build())
+                        .build();
+
+        getAuthHelper().getFirebaseAuth()
                 .signInWithEmailAndPassword(email, password)
                 .addOnFailureListener(new TaskFailureLogger(
                         TAG, "Error signing in with email and password"))
                 .addOnSuccessListener(new OnSuccessListener<AuthResult>() {
                     @Override
                     public void onSuccess(AuthResult authResult) {
-                        finish(RESULT_OK, new Intent());
+                        finish(ResultCodes.OK, response.toIntent());
                     }
                 })
                 .addOnFailureListener(new OnFailureListener() {
@@ -305,8 +302,8 @@ public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
     }
 
     /**
-     * Delete the last credential retrieved from SmartLock and then redirect to the
-     * auth method choice flow.
+     * Delete the last credential retrieved from SmartLock and then redirect to the auth method
+     * choice flow.
      */
     private void deleteCredentialAndRedirect() {
         if (mCredential == null) {
@@ -315,8 +312,8 @@ public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
             return;
         }
 
-        CredentialsApiHelper credentialsApiHelper = CredentialsApiHelper.getInstance(getActivity());
-        credentialsApiHelper.delete(mCredential)
+        GoogleSignInHelper.getInstance(getActivity())
+                .delete(mCredential)
                 .addOnCompleteListener(new OnCompleteListener<Status>() {
                     @Override
                     public void onComplete(@NonNull Task<Status> task) {
@@ -331,9 +328,9 @@ public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
     private void redirectToIdpSignIn(String email, String accountType) {
         if (TextUtils.isEmpty(accountType)) {
             startActivityForResult(
-                    SignInNoPasswordActivity.createIntent(
+                    RegisterEmailActivity.createIntent(
                             getContext(),
-                            mHelper.getFlowParams(),
+                            getFlowParams(),
                             email),
                     RC_EMAIL_FLOW);
             return;
@@ -344,48 +341,17 @@ public class SignInDelegate extends SmartLockBase<CredentialRequestResult> {
                 || accountType.equals(IdentityProviders.TWITTER)) {
             IdpSignInContainer.signIn(
                     getActivity(),
-                    mHelper.getFlowParams(),
-                    email,
-                    accountTypeToProviderId(accountType));
+                    getFlowParams(),
+                    new User.Builder(SmartLockBase.accountTypeToProviderId(accountType), email)
+                            .build());
         } else {
-            Log.w(TAG, "unknown provider: " + accountType);
+            Log.w(TAG, "Unknown provider: " + accountType);
             startActivityForResult(
                     AuthMethodPickerActivity.createIntent(
                             getContext(),
-                            mHelper.getFlowParams()),
+                            getFlowParams()),
                     RC_IDP_SIGNIN);
-            mHelper.dismissDialog();
-        }
-    }
-
-    /**
-     * Check if there is an active or soon-to-be-active network connection.
-     */
-    private boolean hasNetworkConnection() {
-        ConnectivityManager manager =
-                (ConnectivityManager) getActivity().getSystemService(Context.CONNECTIVITY_SERVICE);
-
-        return manager != null
-                && manager.getActiveNetworkInfo() != null
-                && manager.getActiveNetworkInfo().isConnectedOrConnecting();
-    }
-
-    public static void delegate(FragmentActivity activity, FlowParameters params) {
-        FragmentManager fm = activity.getSupportFragmentManager();
-        Fragment fragment = fm.findFragmentByTag(TAG);
-        if (fragment == null || !(fragment instanceof SignInDelegate)) {
-            SignInDelegate result = new SignInDelegate();
-            result.setArguments(FragmentHelper.getFlowParamsBundle(params));
-            fm.beginTransaction().add(result, TAG).disallowAddToBackStack().commit();
-        }
-    }
-
-    public static SignInDelegate getInstance(FragmentActivity activity) {
-        Fragment fragment = activity.getSupportFragmentManager().findFragmentByTag(TAG);
-        if (fragment != null && fragment instanceof SignInDelegate) {
-            return (SignInDelegate) fragment;
-        } else {
-            return null;
+            getDialogHolder().dismissDialog();
         }
     }
 }

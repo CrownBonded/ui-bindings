@@ -15,45 +15,74 @@
 package com.firebase.ui.auth.util.signincontainer;
 
 import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.net.Uri;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.annotation.RestrictTo;
 import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentActivity;
 import android.support.v4.app.FragmentManager;
 import android.text.TextUtils;
 import android.util.Log;
 import android.widget.Toast;
 
 import com.firebase.ui.auth.IdpResponse;
-import com.firebase.ui.auth.ui.ExtraConstants;
-import com.firebase.ui.auth.ui.FlowParameters;
-import com.firebase.ui.auth.ui.FragmentHelper;
-import com.firebase.ui.auth.util.GoogleApiConstants;
+import com.firebase.ui.auth.R;
+import com.firebase.ui.auth.ResultCodes;
+import com.firebase.ui.auth.ui.HelperActivityBase;
+import com.firebase.ui.auth.util.GoogleApiHelper;
 import com.firebase.ui.auth.util.PlayServicesHelper;
 import com.google.android.gms.auth.api.Auth;
 import com.google.android.gms.auth.api.credentials.Credential;
 import com.google.android.gms.common.ConnectionResult;
-import com.google.android.gms.common.GoogleApiAvailability;
 import com.google.android.gms.common.api.GoogleApiClient.Builder;
 import com.google.android.gms.common.api.Status;
 import com.google.firebase.auth.FirebaseUser;
 
-import static android.app.Activity.RESULT_OK;
-
+@RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
 public class SaveSmartLock extends SmartLockBase<Status> {
     private static final String TAG = "SaveSmartLock";
     private static final int RC_SAVE = 100;
     private static final int RC_UPDATE_SERVICE = 28;
+
+    private Context mAppContext;
 
     private String mName;
     private String mEmail;
     private String mPassword;
     private String mProfilePictureUri;
     private IdpResponse mResponse;
+
+    @Nullable
+    public static SaveSmartLock getInstance(HelperActivityBase activity) {
+        SaveSmartLock result;
+
+        FragmentManager fm = activity.getSupportFragmentManager();
+        Fragment fragment = fm.findFragmentByTag(TAG);
+        if (!(fragment instanceof SaveSmartLock)) {
+            result = new SaveSmartLock();
+            result.setArguments(activity.getFlowParams().toBundle());
+            try {
+                fm.beginTransaction().add(result, TAG).disallowAddToBackStack().commit();
+            } catch (IllegalStateException e) {
+                Log.e(TAG, "Cannot add fragment", e);
+                return null;
+            }
+        } else {
+            result = (SaveSmartLock) fragment;
+        }
+
+        return result;
+    }
+
+    @Override
+    public void onAttach(Context context) {
+        super.onAttach(context);
+        mAppContext = context.getApplicationContext();
+    }
 
     @Override
     public void onConnected(Bundle bundle) {
@@ -65,18 +94,14 @@ public class SaveSmartLock extends SmartLockBase<Status> {
 
         Credential.Builder builder = new Credential.Builder(mEmail);
         builder.setPassword(mPassword);
-        if (mPassword == null) {
-            // only password OR provider can be set, not both
-            if (mResponse != null) {
-                String translatedProvider =
-                        providerIdToAccountType(mResponse.getProviderType());
-                if (translatedProvider != null) {
-                    builder.setAccountType(translatedProvider);
-                } else {
-                    Log.e(TAG, "Unable to save null credential!");
-                    finish();
-                    return;
-                }
+        if (mPassword == null && mResponse != null) {
+            String translatedProvider = providerIdToAccountType(mResponse.getProviderType());
+            if (translatedProvider != null) {
+                builder.setAccountType(translatedProvider);
+            } else {
+                Log.e(TAG, "Unable to save null credential!");
+                finish();
+                return;
             }
         }
 
@@ -88,23 +113,22 @@ public class SaveSmartLock extends SmartLockBase<Status> {
             builder.setProfilePictureUri(Uri.parse(mProfilePictureUri));
         }
 
-        mHelper.getCredentialsApi()
+        getAuthHelper().getCredentialsApi()
                 .save(mGoogleApiClient, builder.build())
                 .setResultCallback(this);
     }
 
     @Override
     public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
-        Toast.makeText(getActivity(), "An error has occurred.", Toast.LENGTH_SHORT).show();
+        Toast.makeText(getContext(), R.string.fui_general_error, Toast.LENGTH_SHORT).show();
 
         PendingIntent resolution =
-                GoogleApiAvailability
-                        .getInstance()
-                        .getErrorResolutionPendingIntent(getActivity(),
-                                                         connectionResult.getErrorCode(),
-                                                         RC_UPDATE_SERVICE);
+                PlayServicesHelper.getGoogleApiAvailability()
+                        .getErrorResolutionPendingIntent(getContext(),
+                                connectionResult.getErrorCode(),
+                                RC_UPDATE_SERVICE);
         try {
-            mHelper.startIntentSenderForResult(resolution.getIntentSender(), RC_UPDATE_SERVICE);
+            startIntentSenderForResult(resolution.getIntentSender(), RC_UPDATE_SERVICE);
         } catch (IntentSender.SendIntentException e) {
             Log.e(TAG, "STATUS: Failed to send resolution.", e);
             finish();
@@ -120,15 +144,14 @@ public class SaveSmartLock extends SmartLockBase<Status> {
                 // Try to resolve the save request. This will prompt the user if
                 // the credential is new.
                 try {
-                    mHelper.startIntentSenderForResult(status.getResolution().getIntentSender(),
-                                                       RC_SAVE);
+                    startIntentSenderForResult(status.getResolution().getIntentSender(), RC_SAVE);
                 } catch (IntentSender.SendIntentException e) {
                     // Could not resolve the request
                     Log.e(TAG, "STATUS: Failed to send resolution.", e);
                     finish();
                 }
             } else {
-                Log.w(TAG, status.getStatusMessage());
+                Log.w(TAG, "Status message:\n" + status.getStatusMessage());
                 finish();
             }
         }
@@ -139,15 +162,16 @@ public class SaveSmartLock extends SmartLockBase<Status> {
         super.onActivityResult(requestCode, resultCode, data);
 
         if (requestCode == RC_SAVE) {
-            if (resultCode != RESULT_OK) {
+            if (resultCode != ResultCodes.OK) {
                 Log.e(TAG, "SAVE: Canceled by user");
             }
             finish();
         } else if (requestCode == RC_UPDATE_SERVICE) {
-            if (resultCode == RESULT_OK) {
+            if (resultCode == ResultCodes.OK) {
                 Credential credential = new Credential.Builder(mEmail).setPassword(mPassword)
                         .build();
-                mHelper.getCredentialsApi()
+
+                getAuthHelper().getCredentialsApi()
                         .save(mGoogleApiClient, credential)
                         .setResultCallback(this);
             } else {
@@ -158,16 +182,15 @@ public class SaveSmartLock extends SmartLockBase<Status> {
     }
 
     private void finish() {
-        Intent resultIntent = new Intent().putExtra(ExtraConstants.EXTRA_IDP_RESPONSE, mResponse);
-        finish(RESULT_OK, resultIntent);
+        finish(ResultCodes.OK, mResponse.toIntent());
     }
 
     /**
      * If SmartLock is enabled and Google Play Services is available, save the credentials.
-     * Otherwise, finish the calling Activity with RESULT_OK.
-     *
-     * Note: saveCredentialsOrFinish cannot be called immediately after getInstance because
-     * onCreate has not yet been called.
+     * Otherwise, finish the calling Activity with {@link ResultCodes#OK RESULT_OK}.
+     * <p>
+     * Note: saveCredentialsOrFinish cannot be called immediately after getInstance because onCreate
+     * has not yet been called.
      *
      * @param firebaseUser Firebase user to save in Credential.
      * @param password     (optional) password for email credential.
@@ -176,9 +199,9 @@ public class SaveSmartLock extends SmartLockBase<Status> {
     public void saveCredentialsOrFinish(FirebaseUser firebaseUser,
                                         @Nullable String password,
                                         @Nullable IdpResponse response) {
-        if (!mHelper.getFlowParams().smartLockEnabled
-                || !PlayServicesHelper.getInstance(getContext()).isPlayServicesAvailable()
-                || getActivity().isFinishing()) {
+        mResponse = response;
+
+        if (!getFlowParams().enableCredentials) {
             finish();
             return;
         }
@@ -186,38 +209,15 @@ public class SaveSmartLock extends SmartLockBase<Status> {
         mName = firebaseUser.getDisplayName();
         mEmail = firebaseUser.getEmail();
         mPassword = password;
-        mResponse = response;
         mProfilePictureUri = firebaseUser.getPhotoUrl() != null ? firebaseUser.getPhotoUrl()
                 .toString() : null;
 
-        mGoogleApiClient = new Builder(getContext().getApplicationContext())
+        mGoogleApiClient = new Builder(mAppContext)
                 .addConnectionCallbacks(this)
                 .addOnConnectionFailedListener(this)
                 .addApi(Auth.CREDENTIALS_API)
-                .enableAutoManage(getActivity(), GoogleApiConstants.AUTO_MANAGE_ID2, this)
+                .enableAutoManage(getActivity(), GoogleApiHelper.getSafeAutoManageId(), this)
                 .build();
         mGoogleApiClient.connect();
-    }
-
-    @Nullable
-    public static SaveSmartLock getInstance(FragmentActivity activity, FlowParameters parameters) {
-        SaveSmartLock result;
-
-        FragmentManager fm = activity.getSupportFragmentManager();
-        Fragment fragment = fm.findFragmentByTag(TAG);
-        if (fragment == null || !(fragment instanceof SaveSmartLock)) {
-            result = new SaveSmartLock();
-            result.setArguments(FragmentHelper.getFlowParamsBundle(parameters));
-            try {
-                fm.beginTransaction().add(result, TAG).disallowAddToBackStack().commit();
-            } catch (IllegalStateException e) {
-                Log.e(TAG, "Cannot add fragment", e);
-                return null;
-            }
-        } else {
-            result = (SaveSmartLock) fragment;
-        }
-
-        return result;
     }
 }
