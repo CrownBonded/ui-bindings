@@ -12,25 +12,26 @@
  * limitations under the License.
  */
 
-package com.firebase.ui.database;
 
-import android.support.annotation.NonNull;
-
-import com.google.firebase.database.ChildEventListener;
-import com.google.firebase.database.DataSnapshot;
-import com.google.firebase.database.DatabaseError;
-import com.google.firebase.database.Query;
-import com.google.firebase.database.ValueEventListener;
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * This class implements a collection on top of a Firebase location.
  */
-public class FirebaseArray<T> extends CachingObservableSnapshotArray<T> implements ChildEventListener, ValueEventListener {
+
+class FirebaseArray implements ChildEventListener, ValueEventListener {
+    public interface OnChangedListener {
+        enum EventType {ADDED, CHANGED, REMOVED, MOVED}
+
+        void onChanged(EventType type, int index, int oldIndex);
+
+        void onReady();
+
+        void onCancelled(DatabaseError databaseError);
+    }
+
     private Query mQuery;
     private List<DataSnapshot> mSnapshots = new ArrayList<>();
+
 
     /**
      * Create a new FirebaseArray that parses snapshots as members of a given class.
@@ -40,20 +41,6 @@ public class FirebaseArray<T> extends CachingObservableSnapshotArray<T> implemen
      *              {@code endAt()}.
      * @see ObservableSnapshotArray#ObservableSnapshotArray(Class)
      */
-    public FirebaseArray(Query query, Class<T> tClass) {
-        super(tClass);
-        init(query);
-    }
-
-    /**
-     * Create a new FirebaseArray with a custom {@link SnapshotParser}.
-     *
-     * @see ObservableSnapshotArray#ObservableSnapshotArray(SnapshotParser)
-     * @see FirebaseArray#FirebaseArray(Query, Class)
-     */
-    public FirebaseArray(Query query, SnapshotParser<T> parser) {
-        super(parser);
-        init(query);
     }
 
     private void init(Query query) {
@@ -137,6 +124,11 @@ public class FirebaseArray<T> extends CachingObservableSnapshotArray<T> implemen
     @Override
     public void onDataChange(DataSnapshot dataSnapshot) {
         notifyListenersOnDataChanged();
+    }
+
+    @Override
+    public void onDataChange(DataSnapshot dataSnapshot) {
+        mListener.onReady();
     }
 
     @Override

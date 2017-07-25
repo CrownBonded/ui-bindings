@@ -47,16 +47,17 @@ public abstract class FirebaseListAdapter<T> extends BaseAdapter implements Fire
         mSnapshots = snapshots;
         mLayout = modelLayout;
 
-        startListening();
-    }
 
     /**
-     * @param parser a custom {@link SnapshotParser} to convert a {@link DataSnapshot} to the model
-     *               class
-     * @param query  The Firebase location to watch for data changes. Can also be a slice of a
-     *               location, using some combination of {@code limit()}, {@code startAt()}, and
-     *               {@code endAt()}. <b>Note, this can also be a {@link DatabaseReference}.</b>
-     * @see #FirebaseListAdapter(Context, ObservableSnapshotArray, int)
+     * This method will be triggered each time updates from the database have been completely processed.
+     * So the first time this method is called, the initial data has been loaded - including the case
+     * when no data at all is available. Each next time the method is called, a complete update (potentially
+     * consisting of updates to multiple child items, has been completed.
+     * <p>
+     * You would typically override this method to hide a loading indicator (after the initial load) or
+     * to complete a batch update to a UI element.
+     */
+    
      */
     public FirebaseListAdapter(Context context,
                                SnapshotParser<T> parser,

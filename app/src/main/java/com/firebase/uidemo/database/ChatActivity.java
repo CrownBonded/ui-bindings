@@ -20,7 +20,12 @@ import android.support.v7.app.AppCompatActivity;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
 import android.util.Log;
+
 import android.view.View;
+import android.view.animation.Animation;
+import android.view.animation.BounceInterpolator;
+import android.view.animation.TranslateAnimation;
+import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -62,9 +67,6 @@ public class ChatActivity extends AppCompatActivity implements FirebaseAuth.Auth
         mMessageEdit = (EditText) findViewById(R.id.messageEdit);
         mEmptyListMessage = (TextView) findViewById(R.id.emptyTextView);
 
-        mChatRef = FirebaseDatabase.getInstance().getReference().child("chats");
-
-        mSendButton.setOnClickListener(this);
 
         mManager = new LinearLayoutManager(this);
         mManager.setReverseLayout(false);
@@ -74,6 +76,23 @@ public class ChatActivity extends AppCompatActivity implements FirebaseAuth.Auth
         mMessages.setLayoutManager(mManager);
     }
 
+    private void sendCurrentMessage() {
+        String uid = mAuth.getCurrentUser().getUid();
+        String name = "User " + uid.substring(0, 6);
+
+        Chat chat = new Chat(name, uid, mMessageEdit.getText().toString());
+        mChatRef.push().setValue(chat, new DatabaseReference.CompletionListener() {
+            @Override
+            public void onComplete(DatabaseError databaseError, DatabaseReference reference) {
+                if (databaseError != null) {
+                    Log.e(TAG, "Failed to write message", databaseError.toException());
+                }
+            }
+        });
+
+        mMessageEdit.setText("");
+    }
+
     @Override
     public void onStart() {
         super.onStart();
@@ -81,10 +100,7 @@ public class ChatActivity extends AppCompatActivity implements FirebaseAuth.Auth
         // Default Database rules do not allow unauthenticated reads, so we need to
         // sign in before attaching the RecyclerView adapter otherwise the Adapter will
         // not be able to read any data from the Database.
-        if (isSignedIn()) {
-            attachRecyclerViewAdapter();
-        } else {
-            signInAnonymously();
+
         }
     }
 
@@ -127,59 +143,3 @@ public class ChatActivity extends AppCompatActivity implements FirebaseAuth.Auth
         updateUI();
     }
 
-    private void attachRecyclerViewAdapter() {
-        mAdapter = getAdapter();
-
-        // Scroll to bottom on new messages
-        mAdapter.registerAdapterDataObserver(new RecyclerView.AdapterDataObserver() {
-            @Override
-            public void onItemRangeInserted(int positionStart, int itemCount) {
-                mManager.smoothScrollToPosition(mMessages, null, mAdapter.getItemCount());
-            }
-        });
-
-        mMessages.setAdapter(mAdapter);
-    }
-
-    protected FirebaseRecyclerAdapter<Chat, ChatHolder> getAdapter() {
-        Query lastFifty = mChatRef.limitToLast(50);
-        return new FirebaseRecyclerAdapter<Chat, ChatHolder>(
-                Chat.class,
-                R.layout.message,
-                ChatHolder.class,
-                lastFifty) {
-            @Override
-            public void populateViewHolder(ChatHolder holder, Chat chat, int position) {
-                holder.bind(chat);
-            }
-
-            @Override
-            public void onDataChanged() {
-                // If there are no chat messages, show a view that invites the user to add a message.
-                mEmptyListMessage.setVisibility(getItemCount() == 0 ? View.VISIBLE : View.GONE);
-            }
-        };
-    }
-
-    private void signInAnonymously() {
-        Toast.makeText(this, "Signing in...", Toast.LENGTH_SHORT).show();
-        mAuth.signInAnonymously()
-                .addOnSuccessListener(this, new OnSuccessListener<AuthResult>() {
-                    @Override
-                    public void onSuccess(AuthResult result) {
-                        attachRecyclerViewAdapter();
-                    }
-                })
-                .addOnCompleteListener(new SignInResultNotifier(this));
-    }
-
-    private boolean isSignedIn() {
-        return mAuth.getCurrentUser() != null;
-    }
-
-    private void updateUI() {
-        // Sending only allowed when signed in
-        mSendButton.setEnabled(isSignedIn());
-        mMessageEdit.setEnabled(isSignedIn());
-    }
-}

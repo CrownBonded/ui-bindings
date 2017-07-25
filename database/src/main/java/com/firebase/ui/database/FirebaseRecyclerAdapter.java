@@ -50,23 +50,7 @@ public abstract class FirebaseRecyclerAdapter<T, VH extends RecyclerView.ViewHol
         mViewHolderClass = viewHolderClass;
         mModelLayout = modelLayout;
 
-        startListening();
-    }
 
-    /**
-     * @param parser a custom {@link SnapshotParser} to convert a {@link DataSnapshot} to the model
-     *               class
-     * @param query  The Firebase location to watch for data changes. Can also be a slice of a
-     *               location, using some combination of {@code limit()}, {@code startAt()}, and
-     *               {@code endAt()}. <b>Note, this can also be a {@link DatabaseReference}.</b>
-     * @see #FirebaseRecyclerAdapter(ObservableSnapshotArray, int, Class)
-     */
-    public FirebaseRecyclerAdapter(SnapshotParser<T> parser,
-                                   @LayoutRes int modelLayout,
-                                   Class<VH> viewHolderClass,
-                                   Query query) {
-        this(new FirebaseArray<>(query, parser), modelLayout, viewHolderClass);
-    }
 
     /**
      * @see #FirebaseRecyclerAdapter(SnapshotParser, int, Class, Query)
@@ -166,10 +150,7 @@ public abstract class FirebaseRecyclerAdapter<T, VH extends RecyclerView.ViewHol
     }
 
     /**
-     * Each time the data at the given Firebase location changes, this method will be called for
-     * each item that needs to be displayed. The first two arguments correspond to the mLayout and
-     * mModelClass given to the constructor of this class. The third argument is the item's position
-     * in the list.
+
      * <p>
      * Your implementation should populate the view using the data contained in the model.
      *
