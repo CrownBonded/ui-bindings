@@ -14,27 +14,24 @@
 
 package com.firebase.ui.auth.ui;
 
-import android.content.Intent;
 import android.os.Bundle;
+import android.support.annotation.RestrictTo;
 
-public class AppCompatBase extends android.support.v7.app.AppCompatActivity {
-    protected ActivityHelper mActivityHelper;
+import com.firebase.ui.auth.R;
+
+@SuppressWarnings("Registered")
+@RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
+public class AppCompatBase extends HelperActivityBase {
 
     @Override
     protected void onCreate(Bundle savedInstance) {
         super.onCreate(savedInstance);
-        mActivityHelper = new ActivityHelper(this, getIntent());
-        mActivityHelper.configureTheme();
+        configureTheme();
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        mActivityHelper.dismissDialog();
-    }
-
-    public void finish(int resultCode, Intent intent) {
-        mActivityHelper.finish(resultCode, intent);
+    private void configureTheme() {
+        setTheme(R.style.FirebaseUI); // Provides default values
+        setTheme(getFlowParams().themeId);
     }
 
 }

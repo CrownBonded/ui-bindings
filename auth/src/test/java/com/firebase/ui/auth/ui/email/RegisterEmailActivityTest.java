@@ -15,6 +15,7 @@
 package com.firebase.ui.auth.ui.email;
 
 import android.content.Intent;
+import android.os.Bundle;
 import android.support.design.widget.TextInputLayout;
 import android.widget.Button;
 import android.widget.EditText;
@@ -22,127 +23,118 @@ import android.widget.EditText;
 import com.firebase.ui.auth.AuthUI;
 import com.firebase.ui.auth.BuildConfig;
 import com.firebase.ui.auth.R;
-import com.firebase.ui.auth.test_helpers.ActivityHelperShadow;
-import com.firebase.ui.auth.test_helpers.AutoCompleteTask;
-import com.firebase.ui.auth.test_helpers.CustomRobolectricGradleTestRunner;
-import com.firebase.ui.auth.test_helpers.FakeAuthResult;
-import com.firebase.ui.auth.test_helpers.FirebaseAuthWrapperImplShadow;
-import com.firebase.ui.auth.test_helpers.TestConstants;
-import com.firebase.ui.auth.test_helpers.TestHelper;
-import com.firebase.ui.auth.ui.ExtraConstants;
-import com.firebase.ui.auth.ui.account_link.SaveCredentialsActivity;
-import com.firebase.ui.auth.util.PlayServicesHelper;
-import com.google.firebase.auth.FirebaseUser;
+import com.firebase.ui.auth.User;
+import com.firebase.ui.auth.testhelpers.AuthHelperShadow;
+import com.firebase.ui.auth.testhelpers.AutoCompleteTask;
+import com.firebase.ui.auth.testhelpers.CustomRobolectricGradleTestRunner;
+import com.firebase.ui.auth.testhelpers.FakeAuthResult;
+import com.firebase.ui.auth.testhelpers.TestConstants;
+import com.firebase.ui.auth.testhelpers.TestHelper;
+import com.google.firebase.auth.EmailAuthProvider;
 import com.google.firebase.auth.UserProfileChangeRequest;
 
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.Mockito;
 import org.robolectric.Robolectric;
 import org.robolectric.RuntimeEnvironment;
-import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowActivity;
 
-import java.util.Arrays;
+import java.util.Collections;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
 
 @RunWith(CustomRobolectricGradleTestRunner.class)
-@Config(constants = BuildConfig.class, sdk = 21)
+@Config(constants = BuildConfig.class, sdk = 25)
 public class RegisterEmailActivityTest {
 
-    private RegisterEmailActivity createActivity(String email) {
-        Intent startIntent = SignInNoPasswordActivity.createIntent(
+    private RegisterEmailActivity createActivity() {
+        Intent startIntent = RegisterEmailActivity.createIntent(
                 RuntimeEnvironment.application,
-                TestHelper.getFlowParameters(
-                        RuntimeEnvironment.application,
-                        Arrays.asList(AuthUI.EMAIL_PROVIDER)),
-                email);
+                TestHelper.getFlowParameters(Collections.singletonList(AuthUI.EMAIL_PROVIDER)));
         return Robolectric.buildActivity(RegisterEmailActivity.class)
-                .withIntent(startIntent).create().visible().get();
+                .withIntent(startIntent)
+                .create(new Bundle())
+                .start()
+                .visible()
+                .get();
     }
 
     @Before
     public void setUp() {
         TestHelper.initializeApp(RuntimeEnvironment.application);
-        PlayServicesHelper.sApiAvailability = TestHelper.makeMockGoogleApiAvailability();
     }
 
     @Test
     public void testSignUpButton_validatesFields() {
-        RegisterEmailActivity registerEmailActivity = createActivity(TestConstants.EMAIL);
+        RegisterEmailActivity registerEmailActivity = createActivity();
+
+        // Trigger RegisterEmailFragment (bypass check email)
+        registerEmailActivity.onNewUser(
+                new User.Builder(EmailAuthProvider.PROVIDER_ID, TestConstants.EMAIL).build());
+
         Button button = (Button) registerEmailActivity.findViewById(R.id.button_create);
         button.performClick();
 
-        TextInputLayout nameLayout = (TextInputLayout) registerEmailActivity
-                .findViewById(R.id.name_layout);
-
-        TextInputLayout passwordLayout = (TextInputLayout) registerEmailActivity
-                .findViewById(R.id.password_layout);
+        TextInputLayout nameLayout = (TextInputLayout)
+                registerEmailActivity.findViewById(R.id.name_layout);
+        TextInputLayout passwordLayout = (TextInputLayout)
+                registerEmailActivity.findViewById(R.id.password_layout);
 
         assertEquals(
-                nameLayout.getError().toString(),
-                registerEmailActivity.getString(R.string.required_field));
+                registerEmailActivity.getString(R.string.fui_required_field),
+                nameLayout.getError().toString());
         assertEquals(
-                passwordLayout.getError().toString(),
-                String.format(registerEmailActivity.getString(R.string.password_length),
-                        registerEmailActivity.getResources().getInteger(
-                                R.integer.min_password_length)));
+                String.format(
+                        registerEmailActivity.getResources().getQuantityString(
+                                R.plurals.fui_error_weak_password,
+                                R.integer.fui_min_password_length),
+                        registerEmailActivity.getResources()
+                                .getInteger(R.integer.fui_min_password_length)
+                ),
+                passwordLayout.getError().toString());
     }
 
     @Test
-    @Config(shadows = {ActivityHelperShadow.class, FirebaseAuthWrapperImplShadow.class})
-    public void testSignupButton_successfulRegisterationShouldContinueToSaveCredentials() {
+    @Config(shadows = {AuthHelperShadow.class})
+    public void testSignUpButton_successfulRegistrationShouldContinueToSaveCredentials() {
+        // init mocks
+        reset(AuthHelperShadow.sSaveSmartLock);
+
         TestHelper.initializeApp(RuntimeEnvironment.application);
-        RegisterEmailActivity registerEmailActivity = createActivity(TestConstants.EMAIL);
+        RegisterEmailActivity registerEmailActivity = createActivity();
+
+        // Trigger new user UI (bypassing check email)
+        registerEmailActivity.onNewUser(
+                new User.Builder(EmailAuthProvider.PROVIDER_ID, TestConstants.EMAIL)
+                        .setName(TestConstants.NAME)
+                        .setPhotoUri(TestConstants.PHOTO_URI)
+                        .build());
 
         EditText name = (EditText) registerEmailActivity.findViewById(R.id.name);
         EditText password = (EditText) registerEmailActivity.findViewById(R.id.password);
         name.setText(TestConstants.NAME);
         password.setText(TestConstants.PASSWORD);
 
-        FirebaseUser mockFirebaseUser = Mockito.mock(FirebaseUser.class);
-        when(mockFirebaseUser.getEmail()).thenReturn(TestConstants.EMAIL);
-        when(mockFirebaseUser.getDisplayName()).thenReturn(TestConstants.NAME);
-        when(mockFirebaseUser.updateProfile((UserProfileChangeRequest) Mockito.anyObject()))
+        when(AuthHelperShadow.sFirebaseUser.updateProfile(any(UserProfileChangeRequest.class)))
                 .thenReturn(new AutoCompleteTask<Void>(null, true, null));
 
-        when(ActivityHelperShadow.firebaseAuth
-                .createUserWithEmailAndPassword(
-                        TestConstants.EMAIL,
-                        TestConstants.PASSWORD))
-                .thenReturn(
-                        new AutoCompleteTask<>(
-                                new FakeAuthResult(mockFirebaseUser),
-                                true,
-                                null));
-
+        when(AuthHelperShadow.sFirebaseAuth
+                     .createUserWithEmailAndPassword(
+                             TestConstants.EMAIL,
+                             TestConstants.PASSWORD))
+                .thenReturn(new AutoCompleteTask<>(FakeAuthResult.INSTANCE, true, null));
 
         Button button = (Button) registerEmailActivity.findViewById(R.id.button_create);
         button.performClick();
 
-        ShadowActivity shadowActivity = Shadows.shadowOf(registerEmailActivity);
-
-        ShadowActivity.IntentForResult nextIntent =
-                shadowActivity.getNextStartedActivityForResult();
-
-        assertNotNull(nextIntent);
-        assertEquals(
-                nextIntent.intent.getComponent().getClassName(),
-                SaveCredentialsActivity.class.getName());
-        assertEquals(
+        TestHelper.verifySmartLockSave(
+                EmailAuthProvider.PROVIDER_ID,
                 TestConstants.EMAIL,
-                nextIntent.intent.getExtras().getString(ExtraConstants.EXTRA_EMAIL));
-        assertEquals(
-                TestConstants.PASSWORD,
-                nextIntent.intent.getExtras().getString(ExtraConstants.EXTRA_PASSWORD));
-        assertEquals(
-                TestConstants.NAME,
-                nextIntent.intent.getExtras().getString(ExtraConstants.EXTRA_NAME));
+                TestConstants.PASSWORD);
     }
 }

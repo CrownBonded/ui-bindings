@@ -6,9 +6,9 @@ customizable UI bindings on top of the core
 code and promote best practices (both user experience and security) for
 authentication.
 
-A simple API is provided for drop-in user authentication which handles
-the flow of signing in users with Email/Password,
-Google Sign-In, and Facebook Login. It is built on top of the
+A simple API is provided for drop-in user authentication which handles the flow
+of signing in users with email addresses and passwords, phone numbers, and federated identity
+providers such as Google Sign-In, and Facebook Login. It is built on top of
 [Firebase Auth](https://firebase.google.com/docs/auth).
 
 The best practices embodied in FirebaseUI aim to maximize sign-in
@@ -27,8 +27,3 @@ Equivalent FirebaseUI auth libraries are also available for
 [iOS](https://github.com/firebase/firebaseui-ios/)
 and [Web](https://github.com/firebase/firebaseui-web/).
 
-## Table of Contents
-
-1. [Setup](./docs/setup.md)
-2. [Basic Usage](./docs/basic_usage.md)
-3. [Advanced Usage](./docs/advanced_usage.md)

@@ -1,21 +1,22 @@
-apply from: 'common/constants.gradle'
+apply from: 'constants.gradle'
 
 buildscript {
     repositories {
+        google()
         jcenter()
         mavenLocal()
     }
-    dependencies {
-        classpath 'com.android.tools.build:gradle:2.1.3'
-        classpath 'com.google.gms:google-services:3.0.0'
 
-        classpath 'com.neenbedankt.gradle.plugins:android-apt:1.8'
-        classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.2'
+    dependencies {
+        classpath 'com.android.tools.build:gradle:2.3.1'
+        classpath 'com.google.gms:google-services:3.1.0'
+        classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.7.3'
     }
 }
 
 allprojects {
     repositories {
+        google()
         jcenter()
         mavenLocal()
         mavenCentral()
@@ -36,21 +37,20 @@ if (JavaVersion.current().isJava8Compatible()) {
  */
 allprojects { project ->
 
-
     // Get constants, this is where we store things
     // like the list of submodules or the version
-    project.apply from: "$rootDir/common/constants.gradle"
+    project.apply from: "$rootDir/constants.gradle"
 
     def isLibrary = 'library'.equals(project.name)
-    def isSubmodule = project.ext.submodules.contains(project.name)
+    def isSubmodule = submodules.contains(project.name)
 
     if (isSubmodule || isLibrary) {
 
         // So that we can resolve 'android' variable
         project.apply plugin: 'com.android.library'
         android {
-            compileSdkVersion project.ext.compileSdk
-            buildToolsVersion "${project.ext.buildtools}"
+            compileSdkVersion compileSdk
+            buildToolsVersion buildTools
         }
 
         // Task to generate sources JAR
@@ -167,9 +167,9 @@ allprojects { project ->
 
                 // Ex: authLibrary(MavenPublication)
                 "${project.name}Library"(MavenPublication) {
-                    groupId project.ext.group
+                    groupId group
                     artifactId archivesBaseName
-                    version project.ext.version
+                    version version
 
                     // Release AAR, Sources, and JavaDoc
                     artifact "$buildDir/outputs/aar/$archivesBaseName-release.aar"
@@ -179,7 +179,7 @@ allprojects { project ->
                     pom.withXml {
                         def dependenciesNode = asNode().getAt("dependencies")[0]
                         if (dependenciesNode == null) {
-                            dependenciesNode = asNode().appendNode("dependencies");
+                            dependenciesNode = asNode().appendNode("dependencies")
                         }
 
                         // Add all that are 'compile'
@@ -202,9 +202,9 @@ allprojects { project ->
 
             publications {
                 monolithLibrary(MavenPublication) {
-                    groupId project.ext.group
+                    groupId group
                     artifactId archivesBaseName
-                    version project.ext.version
+                    version version
 
                     artifact "$buildDir/outputs/aar/$archivesBaseName-release.aar"
                     artifact javadocJar
@@ -214,15 +214,15 @@ allprojects { project ->
                     pom.withXml {
                         def dependenciesNode = asNode().getAt("dependencies")[0]
                         if (dependenciesNode == null) {
-                            dependenciesNode = asNode().appendNode("dependencies");
+                            dependenciesNode = asNode().appendNode("dependencies")
                         }
 
                         // Add a maven dependency on each submodule
-                        project.ext.submodules.each { module ->
+                        submodules.each { module ->
                             def dependencyNode = dependenciesNode.appendNode('dependency')
-                            dependencyNode.appendNode('groupId', project.ext.group)
+                            dependencyNode.appendNode('groupId', group)
                             dependencyNode.appendNode('artifactId', "firebase-ui-${module}")
-                            dependencyNode.appendNode('version', project.ext.version)
+                            dependencyNode.appendNode('version', version)
                         }
                     }
                 }
@@ -235,6 +235,7 @@ allprojects { project ->
         project.apply plugin: 'com.jfrog.bintray'
 
         def archivesBaseName = isLibrary ? 'firebase-ui' : "firebase-ui-${project.name}"
+        def publicationName = isLibrary ? 'monolithLibrary' : "${project.name}Library"
         def pomLoc = isLibrary ? "$buildDir/publications/monolithLibrary/pom-default.xml" : "$buildDir/publications/${project.name}Library/pom-default.xml"
 
         group = project.ext.group
@@ -245,22 +246,23 @@ allprojects { project ->
         bintray {
             user = hasProperty('BINTRAY_USER') ? getProperty('BINTRAY_USER') : System.getenv('BINTRAY_USER')
             key = hasProperty('BINTRAY_KEY') ? getProperty('BINTRAY_KEY') : System.getenv('BINTRAY_KEY')
+            publications = [publicationName]
 
             filesSpec {
                 from pomLoc
                 into "com/firebaseui/$archivesBaseName/$versionName/"
                 rename { String fileName ->
-                    "${archivesBaseName}-${project.ext.version}.pom"
+                    "${archivesBaseName}-${version}.pom"
                 }
             }
 
-            configurations = [ 'archives' ]
+            configurations = ['archives']
 
             pkg {
                 repo = 'firebase-ui'
                 name = archivesBaseName
                 userOrg = 'firebaseui'
-                licenses = [ 'Apache-2.0' ]
+                licenses = ['Apache-2.0']
                 vcsUrl = 'https://github.com/firebase/FirebaseUI-Android.git'
 
                 version {
@@ -273,11 +275,11 @@ allprojects { project ->
 
 allprojects {
     afterEvaluate { project ->
-        def isSubmodule = project.ext.submodules.contains(project.name)
+        def isSubmodule = submodules.contains(project.name)
 
         if (isSubmodule) {
             // Only applies to submodules, not the library module
-            def pomTask = "generatePomFileFor${project.name.capitalize()}LibraryPublication";
+            def pomTask = "generatePomFileFor${project.name.capitalize()}LibraryPublication"
 
             // Convenience task to prepare everything we need for releases
             task prepareArtifacts(dependsOn: [javadocJar, sourcesJar, assembleRelease, pomTask]) {}
